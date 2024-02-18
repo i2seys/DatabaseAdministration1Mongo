@@ -86,6 +86,50 @@ public class DrugStoreService {
         }
     }
 
+    public double orderCost(ObjectId orderId) {
+        var order = findOrder(orderId);
+
+        if(order.isEmpty()) {
+            throw new MongoException("Order does not exist");
+        }
+
+        double cost = 0;
+        for (var product: order.get().getProductsInOrder()) {
+            var medicine = medicine(product.getId());
+            if (medicine.isEmpty()) {
+                throw new MongoException("Medicine does not exist");
+            }
+
+            cost += product.getAmount() * medicine.get().getPrice();
+        }
+        return cost;
+    }
+
+    private Optional<Medicine> medicine(ObjectId id) {
+        var filter = new BasicDBObject(Medicine.ID_FIELD, id);
+        var medicine = db.medicines()
+                .find(filter)
+                .into(new ArrayList<>());
+        if(medicine.isEmpty()) {
+            return Optional.empty();
+        } else {
+            return Optional.of(medicine.getFirst());
+        }
+    }
+
+    private Optional<Order> findOrder(ObjectId orderId) {
+        var filter = new BasicDBObject(Order.ID_FIELD, orderId);
+
+        var order = db.orders()
+                .find(filter)
+                .into(new ArrayList<>());
+        if(order.isEmpty()) {
+            return Optional.empty();
+        } else {
+            return Optional.of(order.getFirst());
+        }
+    }
+
     private void insertProductInDb(ObjectId clientId, ObjectId collectingByClientStatusId, ProductInOrder product) {
         var order = Order.builder()
                 .clientId(clientId)
@@ -138,7 +182,11 @@ public class DrugStoreService {
             throw new MongoException("Client has more than one cart");
         }
 
-        return Optional.ofNullable(clientCart.getFirst());
+        if(clientCart.isEmpty()) {
+            return Optional.empty();
+        } else {
+            return Optional.of(clientCart.getFirst());
+        }
     }
 
     private ObjectId collectingByClientStatusId() {
