@@ -5,6 +5,8 @@ import org.example.db.DrugStoreMongoConnector;
 import org.example.model.ProductInOrder;
 import org.example.service.DrugStoreService;
 
+import java.util.ArrayList;
+
 public class Main {
     public static void main(String[] args) {
         try (DrugStoreMongoConnector ignored = DrugStoreMongoConnector.getInstance()){
@@ -14,7 +16,7 @@ public class Main {
             var orders = service.orders();
             service.addProductInCart(
                     new ObjectId("65cb49057e30a8d3f4e8066e"),
-                    new ProductInOrder(new ObjectId("65cb56ebb780aeec2c71fb8b"),2));
+                    new ProductInOrder(new ObjectId("65cb56ebb780aeec2c71fb8b"),1));
             System.out.println("MEDICINE");
             medicines.forEach(System.out::println);
 

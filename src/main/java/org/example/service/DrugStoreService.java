@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static com.mongodb.client.model.Filters.*;
 
@@ -74,20 +75,61 @@ public class DrugStoreService {
     }
     //Реализовать функционал добавления товаров в корзину и подсчета общей стоимости заказа;
     public void addProductInCart(ObjectId clientId, ProductInOrder product) {
-        //предполагается, что в бд есть 1 или 0 документов
-        //в коллекции orders с айди клиента
-        //таких, что CategoryId = категории "Собирается клиентом"
-        var collectingByClientStatus = db.statuses()
-                .find(eq(Status.NAME_FIELD, Status.COLLECTING_BY_CLIENT_NAME_FIELD))
-                .first();
-        if(collectingByClientStatus == null) {
-            throw new MongoException("Can't find correct status in DB");
-        }
-        var collectingByClientStatusId = collectingByClientStatus.getId();
+        var collectingByClientStatusId = collectingByClientStatusId();
 
+        var clientCart = clientCart(clientId, collectingByClientStatusId);
+
+        if(clientCart.isEmpty()) {
+            createCartWithProduct(clientId, collectingByClientStatusId, product);
+        } else {    
+            insertProductInDb(clientId, collectingByClientStatusId, product);
+        }
+    }
+
+    private void insertProductInDb(ObjectId clientId, ObjectId collectingByClientStatusId, ProductInOrder product) {
+        var order = Order.builder()
+                .clientId(clientId)
+                .statusId(collectingByClientStatusId)
+                .build();
+        var bsonOrder = ObjectToBsonConverter.fromOrder(order);
+
+        var foundedOrder = db.orders()
+                .find(bsonOrder)
+                .into(new ArrayList<>())
+                .getFirst();
+
+        addProduct(foundedOrder, product);
+
+        var query = ObjectToBsonConverter.fromOrder(Order.builder()
+                .id(foundedOrder.getId())
+                .build());
+
+        var update = Updates.combine(
+                Updates.set(Order.PRODUCTS_FIELD, foundedOrder.getProductsInOrder()),
+                Updates.set(Order.STATUS_CHANGED_TIME_FIELD, LocalDateTime.now()));
+
+        db.orders().updateOne(query, update);
+    }
+
+    private void createCartWithProduct(
+            ObjectId clientId,
+            ObjectId collectingByClientStatusId,
+            ProductInOrder product
+    ) {
+        var order = Order.builder()
+                .clientId(clientId)
+                .statusId(collectingByClientStatusId)
+                .statusChangeTime(LocalDateTime.now())
+                .build();
+        addProduct(order, product);
+
+        db.orders().insertOne(order);
+    }
+
+    private Optional<Order> clientCart(ObjectId clientId, ObjectId collectingByClientStatusId) {
         var findFilter = new BasicDBObject(Map.of(
-                    Order.CLIENT_ID_FIELD, clientId,
-                    Order.STATUS_ID_FIELD, collectingByClientStatusId
+                Order.CLIENT_ID_FIELD, clientId,
+                Order.STATUS_ID_FIELD, collectingByClientStatusId
         ));
         var clientCart = db.orders()
                 .find(findFilter)
@@ -96,37 +138,20 @@ public class DrugStoreService {
             throw new MongoException("Client has more than one cart");
         }
 
-        var orderBuilder = Order.builder()
-                .clientId(clientId)
-                .statusId(collectingByClientStatus.getId());
-        if(clientCart.isEmpty()) {
-            //в таблице заказов создать новую запись с новым продуктом
-            var order = orderBuilder
-                    .productsInOrder(List.of(product))
-                    .statusChangeTime(LocalDateTime.now())
-                    .build();
-
-            db.orders().insertOne(order);
-        } else {
-            var order = orderBuilder.build();
-            var orderToFind = ObjectToBsonConverter.fromOrder(order);
-            var foundedOrder = db.orders()
-                    .find(orderToFind)
-                    .into(new ArrayList<>()).getFirst();
-
-            addProduct(foundedOrder, product);
-
-            var query = ObjectToBsonConverter.fromOrder(Order.builder()
-                            .id(foundedOrder.getId())
-                            .build());
-
-            var update = Updates.combine(
-                    Updates.set(Order.PRODUCTS_FIELD, foundedOrder.getProductsInOrder()),
-                    Updates.set(Order.STATUS_CHANGED_TIME_FIELD, LocalDateTime.now()));
-
-            db.orders().updateOne(query, update);
-        }
+        return Optional.ofNullable(clientCart.getFirst());
     }
+
+    private ObjectId collectingByClientStatusId() {
+        var collectingByClientStatus = db.statuses()
+                .find(eq(Status.NAME_FIELD, Status.COLLECTING_BY_CLIENT_NAME_FIELD))
+                .first();
+        if(collectingByClientStatus == null) {
+            throw new MongoException("Can't find correct status in DB");
+        }
+
+        return collectingByClientStatus.getId();
+    }
+
 
     private void addProduct(Order order, ProductInOrder productToAdd) {
         var orderProducts = order.getProductsInOrder();
